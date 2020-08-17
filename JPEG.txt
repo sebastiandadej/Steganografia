@@ -1,0 +1,425 @@
+    if( obrazBMP == NULL ) return;
+
+    //WARTOŒCI ZAŒLEPEK - dla uproszczenia
+    //[...]
+
+    int wymiarY =  obrazBMP->height();
+    int wymiarX =  obrazBMP->width();
+    if( wymiarX % 8 != 0 ) wymiarX += wymiarX % 8;
+    if( wymiarY % 8 != 0 ) wymiarY += wymiarY % 8;
+
+    int obrazTEMP[ wymiarX ][ wymiarY ];
+
+    for( int i=wymiarY-1; i>=obrazBMP->height(); i-- )
+        for( int j=wymiarX-1; j>=obrazBMP->width(); j--)
+        {
+            obrazTEMP[j][i] = 0; //¿eby wiedzieæ, ¿e nie maw w nim wartoœci
+        }
+
+    for( int i=0; i<obrazBMP->height(); i++ ) //Y
+        for( int j=0; j<obrazBMP->width(); j++ ) //X
+        {
+            obrazTEMP[j][i] = obrazBMP->pixel(j,i);
+        }
+
+    int kolorTEMP=0xFFFFFF; //Bia³y
+    for( int i=0; i<wymiarY; i++ )
+        for( int j=0; j<wymiarX; j++)
+        {
+            if( obrazTEMP[j][i] == 0 )
+            {
+                obrazTEMP[j][i] = kolorTEMP; //puste piksele zamalowujemy kolorem pikseli na krawêdziach
+                continue;
+            }
+            kolorTEMP = obrazTEMP[j][i];
+        }
+
+    double Y[ wymiarX ] [ wymiarY ];
+    double Cb[ wymiarX ][ wymiarY ];
+    double Cr[ wymiarX ][ wymiarY ];
+
+
+    //KONWERSJA DO YCC, wraz z rzutowaniem [0,255] -> [-127, 128]
+    //R'd, G'd, B'd   w {0, 1, 2, ..., 255}
+    //Y', Cb, Cr      w {0, 1, 2, ..., 255}
+
+    for( int i=0; i<wymiarY; i++)
+         for( int j=0; j<wymiarX; j++)
+        {
+            Y[j][i] =       0.299  * barwa( obrazTEMP[j][i], 'R')  + 0.587 * barwa( obrazTEMP[j][i], 'G' ) + 0.114 * barwa( obrazTEMP[j][i], 'B');
+            qDebug() << "Wartosci: " << barwa( obrazTEMP[j][i], 'R') << " G: " << barwa( obrazTEMP[j][i], 'G' )  << " B: " << barwa( obrazTEMP[j][i], 'B');
+            Cb[j][i]=128.0 - 0.168736 * barwa( obrazTEMP[j][i], 'R') -0.331264 * barwa( obrazTEMP[j][i], 'G' ) + 0.5 * barwa( obrazTEMP[j][i], 'B');
+            Cr[j][i]=128.0 + 0.5 * barwa( obrazTEMP[j][i], 'R') - 0.418688 * barwa( obrazTEMP[j][i], 'G' ) - 0.081312 * barwa( obrazTEMP[j][i], 'B');
+        }
+
+    //SUBSAMPLING
+
+
+    //DCT
+    //int wymiarY =  obrazBMP->height();
+    //int wymiarX =  obrazBMP->width();
+    //if( wymiarX % 8 != 0 ) wymiarX += wymiarX % 8;
+    //if( wymiarY % 8 != 0 ) wymiarY += wymiarY % 8;
+
+    double DCT[3][ wymiarX ][ wymiarY ];
+    float pi = 3.14;
+
+    for( int i=0; i<wymiarY; i=i+8) //Y
+        for( int j=0; j<wymiarX; j=j+8 ) //X
+        {
+            //DCT Y
+             for( int k=0; k<8; k++) //V  [extra y]
+                for( int l=0; l<8; l++) //U  [extra x]
+                {
+                    float sumaYX = 0;
+                    for( int m=0; m<8; m++ ) //X
+                        for( int n=0; n<8; n++) //Y
+                        {
+                          sumaYX += Y[j + m][i + n] * cos( (2*m+1 ) * pi * l / 16 ) * cos( (2*n+1 ) * pi * k  / 16 );
+                        }
+
+                    DCT[0][ j + l][ i + k ] = 0.25 * alfa(k) * alfa(l) * sumaYX;
+                }
+        }
+
+    /////////
+    for( int i=0; i<wymiarY; i=i+8) //Y
+        for( int j=0; j<wymiarX; j=j+8 ) //X
+        {
+            //DCT Y
+             for( int k=0; k<8; k++) //V  [extra y]
+                for( int l=0; l<8; l++) //U  [extra x]
+                {
+                    float sumaYX;
+                    for( int m=0; m<8; m++ ) //X
+                        for( int n=0; n<8; n++) //Y
+                        {
+                          sumaYX += Cb[j + m][i + n] * cos( (2*m+1 ) * pi * l / 16 ) * cos( (2*n+1 ) * pi * k  / 16 );
+                        }
+
+                    DCT[1][ j + l][ i + k ] = 0.25 * alfa(k) * alfa(l) * sumaYX;
+                }
+        }
+
+    ///////////
+    for( int i=0; i<wymiarY; i=i+8) //Y
+        for( int j=0; j<wymiarX; j=j+8 ) //X
+        {
+            //DCT Y
+             for( int k=0; k<8; k++) //V  [extra y]
+                for( int l=0; l<8; l++) //U  [extra x]
+                {
+                    float sumaYX;
+                    for( int m=0; m<8; m++ ) //X
+                        for( int n=0; n<8; n++) //Y
+                        {
+                          sumaYX += Cr[j + m][i + n] * cos( (2*m+1 ) * pi * l / 16 ) * cos( (2*n+1 ) * pi * k  / 16 );
+                        }
+
+                    DCT[2][ j + l][ i + k ] = 0.25 * alfa(k) * alfa(l) * sumaYX;
+                }
+        }
+
+
+    //KWANTYZACJA
+    float tabelaKwantyzacji[8][8] = { {16, 11, 10, 16, 24, 40, 51, 61},
+                                    {12, 12, 14, 19, 26, 58, 60, 55},
+                                    {14, 13, 16, 24, 40, 57, 69, 56},
+                                    {14, 17, 22, 29, 51, 87, 80, 62},
+                                    {18, 22, 37, 56, 68, 109, 103, 77},
+                                    {24, 35, 55, 64, 81, 104, 113, 92},
+                                    {49, 64, 78, 87, 103, 121, 120, 101},
+                                    {72, 92, 95, 98, 112, 100, 103, 99} };
+
+    float tabelaKwantyzacji100[8][8] = { {1, 1, 1, 1, 1, 1, 1, 1},
+                                         {1, 1, 1, 1, 1, 1, 1, 1},
+                                         {1, 1, 1, 1, 1, 1, 1, 1},
+                                         {1, 1, 1, 1, 1, 1, 1, 1},
+                                         {1, 1, 1, 1, 1, 1, 1, 1},
+                                         {1, 1, 1, 1, 1, 1, 1, 1},
+                                         {1, 1, 1, 1, 1, 1, 1, 1},
+                                         {1, 1, 1, 1, 1, 1, 1, 1} };
+
+    int quanDCT[3][ wymiarX ][ wymiarY ];
+
+
+    for( int z=0; z<3; z++)
+    {
+        for( int i=0; i< wymiarY; i=i+8) //Y
+            for( int j=0; j< wymiarX ; j=j+8) //X
+            {
+                for( int k=0; k<8; k++) //Y
+                    for( int l=0; l<8; l++) //X
+                    {
+                        quanDCT[z][j+l][i+k] = (int) round( DCT[ z ][ j+l ][ i+k ] / tabelaKwantyzacji[l][k] ); //Sprawdzic!
+                    }
+            }
+    }
+
+
+    for( int i=0; i<8; i++ ) //Y
+    {
+        for( int j=0; j<8; j++) //X
+            qDebug() << "Y:" << Y[j][i] << " Przed: " << DCT[0][j][i] << " Po:" << quanDCT[0][j][i];
+        qDebug() << "  ";
+    }
+    printf("\n");
+
+    qDebug() << "Po wszsytkim";
+
+
+    char tekst[ 200000 ];
+    tekst[0] =0;
+
+    for( int z=0; z<3; z++)
+    {
+        for( int j=0; j <wymiarY; j++ )
+        {
+            for( int i=0; i<wymiarX; i++ )
+            {
+                sprintf(tekst, "%s %d", tekst, quanDCT[ z ][i][j] );
+                if( i % 8 == 0 && i!=0 ) sprintf( tekst, "%s    ", tekst );
+            }
+            sprintf( tekst, "%s\n\n", tekst);
+        }
+        sprintf( tekst, "%s\n\n\n\n\n", tekst );
+    }
+
+    QFile *plik;
+
+    plik = new QFile();
+    plik->setFileName( "wynik_DCT.txt" );
+    //plik->setTextModeEnabled( true );
+
+    plik->open( QIODevice::WriteOnly );
+
+    plik->write( tekst );
+
+    plik->close();
+    //KONWERSJA DO RGB
+
+    //R = Y                        + 1.402   * (Cr - 128)
+    //G = Y – 0.34414 * (Cb - 128) – 0.71414 * (Cr - 128)
+    //B = Y + 1.772   * (Cb - 128)
+
+
+
+
+void MainWindow::slotWczytajJPEG()
+{
+    nazwaPliku = QFileDialog::getOpenFileName(this, tr("Open file"), "c:\\" , tr("Images (*.png *.jpg *.bmp *.jpeg)"));
+    if( nazwaPliku == "" ) return;
+
+    /*
+    obrazJPEG = new QImage();
+
+    obrazJPEG->load(nazwaPliku); //jaki plik
+
+    ui->labelObrazekPrzed->setPixmap( QPixmap::fromImage( *obrazJPEG) );
+    ui->labelObrazekPo->setPixmap( QPixmap::fromImage( *obrazJPEG ) );
+
+    //Zak³adka informacje o noœniku
+    QString temp;
+    temp = "Nazwa pliku: " + nazwaPliku + "\n" + QString( "Wysokoœæ: %1 \nSzerokoœæ: %2\n" ).arg( obrazJPEG->height() ).arg( obrazJPEG->width() );
+
+    if( sprawdzCzyJestJuzWiadomosc() == true )
+        temp += "W pliku jest ju¿ osadzona informacja" + QString( " na pozycji %1, %2" ).arg( startX ).arg( startY ) + QString(" iloscPreambu³: %1").arg( iloscPreambul );
+    else temp += "W pliku nie ma osadzonej wczeœniej wiadomoœci";
+
+    ui->labelInfONosniku->setText(temp);
+
+    //Obs³uga pliku binarnego
+    obrazJPEG_plik.setFileName( nazwaPliku );
+    if( obrazJPEG_plik.open( QIODevice::ReadOnly ) )
+    {
+        qDebug() << "Otworzono plik";
+    }
+
+    QByteArray bufor;
+    bufor = obrazJPEG_plik.readAll();
+
+    QDataStream strumienDanych( &bufor, QIODevice::ReadOnly );
+    strumienDanych.setByteOrder( QDataStream::BigEndian );
+
+    //Odczyt zawartoœci pliku
+    char znaki[4000];
+
+    strumienDanych.readRawData(znaki,4000);
+
+    for( int i=0; i<1000; i++)
+    {
+        qDebug() << QString("Znaki to: %1 - %2 - %3").arg( znaki[i], 0 , 2 ).arg( znaki[i], 0,16).arg( znaki[i], 0, 10 );
+    }
+
+    //Pzretwazranie danych ****
+    QDataStream strumienDanych2( &bufor, QIODevice::ReadOnly );
+    strumienDanych2.setByteOrder( QDataStream::BigEndian );
+
+    //Odczyt zawartoœci pliku
+    Plik_JPEG plik_JPEG;
+
+    short int znacznik, rozmiar;
+
+    short int nic1, nic2, rozmairSegmentu;
+    strumienDanych2 >> nic1; //Nie wiem po co s¹ te 4 bajty...
+    strumienDanych2 >> nic2;
+    strumienDanych2 >> rozmairSegmentu;
+
+    qDebug() << QString("Znaczik: %1").arg(nic1, 0 , 16);
+    qDebug() << QString("Znaczik: %1").arg(nic2, 0 , 16);
+    qDebug() << "Rozmair segmentu: " << rozmairSegmentu << "bitów";
+
+    strumienDanych2.readRawData( plik_JPEG.typKontenera, 5); //JTIF/0
+      qDebug() << "Jest to koneter: " << plik_JPEG.typKontenera;
+
+    strumienDanych2 >> plik_JPEG.wersja; //Nie wiem po co s¹ te 4 bajty...
+      qDebug() << QString("Wersja: %1").arg( plik_JPEG.wersja, 0 , 16);
+
+    strumienDanych2.readRawData( plik_JPEG.densityUnits,1 );
+      qDebug() << "Density Units: " << (int)plik_JPEG.densityUnits[0];
+
+    strumienDanych2 >> plik_JPEG.densityX >> plik_JPEG.densityY;
+      qDebug() << "Gêstoœæ (poizoma) " << plik_JPEG.densityX << " X (pionowa) " << plik_JPEG.densityY;
+
+    strumienDanych2.readRawData( plik_JPEG.rozmairMiniatury,2);
+      qDebug() << "Rozmiar miniatury to: " << (int)plik_JPEG.rozmairMiniatury[0] << " x " << (int)plik_JPEG.rozmairMiniatury[1];
+    //Thumbnail data 	3 × tw × th 	Uncompressed 24 bit RGB raster thumbnail  , (int)rozmairMiniatury[0] (int)rozmairMiniatury[1]
+
+
+    strumienDanych2 >> znacznik;
+      qDebug() << "Znacznik 2 to: " << QString("%1").arg(znacznik, 0, 16);
+
+    strumienDanych2 >> plik_JPEG.rozKomen;
+      qDebug() << "Rozmair 2 to: " << plik_JPEG.rozKomen;
+
+    strumienDanych2.readRawData( plik_JPEG.komentarz, plik_JPEG.rozKomen-2); //Dwa ostatnie bity to znaczniki
+      qDebug() << "To jest: " << plik_JPEG.komentarz;
+
+    strumienDanych2 >> znacznik;
+      qDebug() << "Znacznik 3: " << QString("%1").arg(znacznik, 0, 16);
+
+    strumienDanych2 >> rozmiar;
+      qDebug() << "Rozmair 3 to: " << rozmiar; //Tu uciak³y mi 3 bity
+
+    char smiec[2];
+    strumienDanych2.readRawData( smiec, 1); //Jakiœ œmieciowy bit - CO TO?
+    strumienDanych2.readRawData(plik_JPEG.macierzKwan1, 64);
+
+    QString napis;
+    for( int i=0; i<64; i++)
+    {
+        if( i%8 == 0 && i!=0 ) napis.append( (char)10 ); //Nowa Linia
+        napis.append( QString( "%1 ").arg( (int)plik_JPEG.macierzKwan1[i/8] ) );
+    }
+    qDebug() << "Macierz kwantyzacji [1]: " << endl << napis;
+
+    strumienDanych2 >> znacznik;
+      qDebug() << "Znacznik 4: " << QString("%1").arg(znacznik, 0, 16);
+
+    strumienDanych2 >> rozmiar;
+      qDebug() << "Rozmair 4 to: " << rozmiar; //Tu uciak³y mi 3 bity
+
+    strumienDanych2.readRawData( smiec, 1); //Jakiœ œmieciowy bit - CO TO? Numer porzadkowy ?
+    strumienDanych2.readRawData( plik_JPEG.macierzKwan2, 64);
+
+    napis.resize(0);
+    for( int i=0; i<64; i++)
+    {
+        if( i%8 == 0 && i!=0 ) napis.append( (char)10 ); //Nowa Linia
+        napis.append( QString( "%1 ").arg( (int)plik_JPEG.macierzKwan2[i/8] ) );
+    }
+    qDebug() << "Macierz kwantyzacji [2]: " << endl << napis;
+
+    strumienDanych2 >> znacznik;
+      qDebug() << "Znacznik 5: " << QString("%1").arg(znacznik, 0, 16);
+
+    strumienDanych2 >> rozmiar;
+      qDebug() << "Rozmair 5 to: " << rozmiar;
+
+    strumienDanych2.readRawData( plik_JPEG.infoDCT, rozmiar-2); //Narazie to musze sie zastanowiæ co z tym zorbie
+      //qDebug() << QString("Zmienna1: %1 Zmienna2: %2 Zmienna3: %3 Zmienna4: %4").arg( (int)plik_JPEG.infoDCT[0] ).arg( (int)plik_JPEG.infoDCT[1] ).arg( (int)plik_JPEG.infoDCT[2] ).arg( (int)plik_JPEG.infoDCT[3] );
+
+   strumienDanych2 >> znacznik;
+      qDebug() << "Znacznik 6: " << QString("%1").arg(znacznik, 0, 16);
+
+   strumienDanych2 >> rozmiar;
+      qDebug() << "Rozmair 6 to: " << rozmiar;
+
+   strumienDanych2.readRawData(plik_JPEG.tabHuffman1, rozmiar-2);
+      napis.resize(0);
+      for( int i=0; i<rozmiar-2; i++ ) napis.append( QString("%1 ").arg( (int)plik_JPEG.tabHuffman1[i] ) );
+      qDebug() << "Tablica Huffmana: " << endl << napis;
+
+   strumienDanych2 >> znacznik;
+      qDebug() << "Znacznik 7: " << QString("%1").arg(znacznik, 0, 16);
+
+   strumienDanych2 >> rozmiar;
+      qDebug() << "Rozmair 7 to: " << rozmiar;
+
+   strumienDanych2.readRawData(plik_JPEG.tabHuffman2, rozmiar-2);
+    napis.resize(0);
+    for( int i=0; i<rozmiar-2; i++ ) napis.append( QString("%1 ").arg( (int)plik_JPEG.tabHuffman1[i] ) );
+    qDebug() << "Tablica Huffmana: " << endl << napis;
+
+
+
+   short int liczbaAA;
+   int k = 0;
+  */
+   //bufor.
+   /*for( int i=0; i < bufor.size(); i++)
+   {
+       if( bufor[i] == 0xFF )
+       {
+          qDebug() << QString("Znacznik na bit: %1: %2").arg(i).arg( (char)bufor[i],0,16 );
+          qDebug() << QString("Znacznik nastepny %1 to: %2").arg(i+1).arg( (char)bufor[i+1],0,16 );
+
+          k++;
+          qDebug() << "Jest to bit " << i <<" pliku";
+
+          //strumienDanych >> rozmiar;
+          //qDebug() << "Rozmair " << k <<" : " << rozmiar;
+       }
+   }*/
+
+   //strumienDanych2.readRawData()
+
+}
+
+
+#include <QDebug>
+
+#ifndef PLIK_JPEG_H
+#define PLIK_JPEG_H
+
+class Plik_JPEG
+{
+public:
+    Plik_JPEG();
+
+    //
+    char typKontenera[5]; //Always equals "JFIF" (with zero following) (0x4A46494600)
+    short int wersja;
+    char densityUnits[2]; //I tak wykozystujemy tylko jeden znak
+    short int densityX, densityY;
+    char rozmairMiniatury[3];
+
+
+    //Komentarz
+    short int rozKomen;
+    char komentarz[100];
+
+    //Macierz kwantyzacji
+    char macierzKwan1[64]; // 8 x 8
+    char macierzKwan2[64]; // 8 x 8
+
+    //Bazeline czy Progresywny DCT
+    char infoDCT[20];
+
+    //Tabela Huffmana
+    char tabHuffman1[100];
+    char tabHuffman2[100];
+};
+
+#endif // PLIK_JPEG_H
+
